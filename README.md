@@ -44,6 +44,16 @@ curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
 Configurazione tramite variabili d'ambiente: `MODEL_NAME`, `MODEL_REVISION`, `MAX_TEXT_CHARS`,
 `MAX_BATCH_SIZE`, `MAX_SEQ_LENGTH`.
 
+## Docker
+
+```bash
+docker build -t sentiment-api:local .          # ~5 min la prima volta, poi pochi secondi se cambia solo il codice
+docker run --rm -p 8000:8000 sentiment-api:local
+```
+
+L'immagine usa `python:3.11-slim` con PyTorch CPU, include i pesi del modello (nessun download all'avvio), gira
+come utente non-root e ha un `HEALTHCHECK` su `/health`. Per un'immagine senza pesi: `--build-arg PRELOAD_MODEL=0`.
+
 ## Test e qualità del codice
 
 ```bash
