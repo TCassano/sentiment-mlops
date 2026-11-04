@@ -1,0 +1,4 @@
+# CPU-only PyTorch build: ~200 MB instead of ~2.5 GB of CUDA wheels.
+# Install with: pip install -r requirements-torch-cpu.txt
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1

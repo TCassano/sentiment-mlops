@@ -1,0 +1,13 @@
+# Development / CI / pipeline dependencies (on top of requirements.txt).
+-r requirements.txt
+datasets==3.2.0
+# Used directly (parquet I/O in the pipeline). Pinned: left transitive, pip picked
+# pyarrow 26 in CI, which pandas 2.2.3 + numpy 1.26 cannot import.
+pyarrow==25.0.1
+scikit-learn==1.6.0
+pandas==2.2.3
+pytest==8.3.4
+pytest-cov==6.0.0
+httpx==0.28.1
+ruff==0.8.4
+pre-commit==4.0.1

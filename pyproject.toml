@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentiment-service"
+version = "0.1.0"
+description = "MLOps pipeline for social media sentiment monitoring"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+# The review notebook is executed documentation, not library code.
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, simplify, naming
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "N"]
+# B008: FastAPI-style defaults in signatures are fine
+ignore = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sentiment_service"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"
+markers = [
+    "model: tests that download and run the real HuggingFace model (slower)",
+]

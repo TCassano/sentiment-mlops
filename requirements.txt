@@ -1,0 +1,10 @@
+# Runtime dependencies of the inference service (pinned for reproducibility).
+# torch is installed separately from the CPU index: see requirements-torch-cpu.txt
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+transformers==4.47.1
+tokenizers==0.21.0
+huggingface-hub==0.27.0
+numpy==1.26.4
+prometheus-client==0.21.1
