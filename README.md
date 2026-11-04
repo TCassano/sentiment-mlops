@@ -17,6 +17,13 @@ pip install -e . --no-deps                 # installa il pacchetto sentiment_ser
 pre-commit install                         # ruff gira automaticamente a ogni commit
 ```
 
+| File | Contenuto |
+|---|---|
+| `requirements.txt` | dipendenze del servizio, con versioni bloccate |
+| `requirements-torch-cpu.txt` | PyTorch CPU, installato a parte dal suo indice |
+| `requirements-dev.txt` | test, lint, dataset e strumenti di sviluppo |
+| `pyproject.toml` | metadati del pacchetto, configurazione di ruff e pytest |
+
 ## Avvio del servizio
 
 ```bash
@@ -37,9 +44,10 @@ curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
 Configurazione tramite variabili d'ambiente: `MODEL_NAME`, `MODEL_REVISION`, `MAX_TEXT_CHARS`,
 `MAX_BATCH_SIZE`, `MAX_SEQ_LENGTH`.
 
-| File | Contenuto |
-|---|---|
-| `requirements.txt` | dipendenze del servizio, con versioni bloccate |
-| `requirements-torch-cpu.txt` | PyTorch CPU, installato a parte dal suo indice |
-| `requirements-dev.txt` | test, lint, dataset e strumenti di sviluppo |
-| `pyproject.toml` | metadati del pacchetto, configurazione di ruff e pytest |
+## Test e qualità del codice
+
+```bash
+pytest -m "not model"          # suite veloce: API con modello finto (~1 s)
+pytest -m model                # test comportamentali sul modello reale (scarica i pesi la prima volta)
+ruff check . && ruff format --check .
+```
