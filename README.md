@@ -1,8 +1,27 @@
 # Sentiment Monitoring — pipeline MLOps
 
+[![CI/CD](https://github.com/TCassano/sentiment-mlops/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/TCassano/sentiment-mlops/actions/workflows/ci-cd.yml)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TCassano/sentiment-mlops/blob/main/notebooks/MLOps_Sentiment_Pipeline.ipynb)
+
 Servizio di classificazione del sentiment (negativo / neutro / positivo) per post social, basato sul modello
 pre-addestrato
-[`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest).
+[`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest),
+con test, container, CI/CD, monitoraggio (Prometheus + Grafana) e un ciclo settimanale di valutazione e retraining
+(Airflow).
+
+Il notebook [`notebooks/MLOps_Sentiment_Pipeline.ipynb`](notebooks/MLOps_Sentiment_Pipeline.ipynb) documenta
+architettura, scelte, risultati e limiti, ed esegue sul codice reale test, valutazione, analisi di drift e un giro
+completo degli step del DAG.
+
+```
+src/sentiment_service/   servizio FastAPI, modello, metriche, configurazione
+  └── pipeline/          raccolta, validazione, valutazione, drift, retraining (usati dal DAG)
+tests/                   test di API, modello, drift, pipeline, step e DAG
+airflow/dags/            DAG settimanale
+monitoring/              Prometheus (scrape + alert) e Grafana (datasource, dashboard, alert)
+scripts/                 valutazione da CLI e generatore di traffico
+notebooks/               notebook di documentazione e risultati
+```
 
 ## Setup dell'ambiente
 
@@ -151,3 +170,15 @@ pytest -m "not model"          # suite veloce: API con modello finto (~1 s)
 pytest -m model                # test comportamentali sul modello reale (scarica i pesi la prima volta)
 ruff check . && ruff format --check .
 ```
+
+## Comandi rapidi (Makefile)
+
+Su Linux/macOS (o Windows con `make` installato), con il venv attivo:
+
+| Comando | Cosa fa |
+|---|---|
+| `make install` | installa le dipendenze bloccate, il pacchetto e gli hook di pre-commit |
+| `make lint` / `make format` | controlla / sistema stile e formattazione con ruff |
+| `make test` / `make test-model` | suite veloce con copertura / test sul modello reale |
+| `make docker-build` / `make docker-run` | costruisce / avvia l'immagine del servizio |
+| `make up` / `make down` | avvia / spegne lo stack con Prometheus e Grafana |
