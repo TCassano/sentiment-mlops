@@ -1,0 +1,72 @@
+# Grafana-managed alert rules (visible under Alerting -> Alert rules).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: sentiment-alerts
+    folder: Sentiment
+    interval: 1m
+    rules:
+      - uid: sentiment-high-error-rate
+        title: High 5xx error rate (> 5%)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: More than 5% of API requests failed with a 5xx status in the last 5 minutes.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: >
+                sum(rate(sentiment_http_requests_total{status=~"5.."}[5m]))
+                / clamp_min(sum(rate(sentiment_http_requests_total[5m])), 1e-9)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+
+      - uid: sentiment-low-confidence
+        title: Low-confidence share > 15% (drift proxy)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: >
+            Over the last hour more than 15% of predictions (about 4x the 4% reference baseline)
+            had top-class probability < 0.5.
+            Inputs may have drifted away from the training distribution: run the drift DAG.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: >
+                sum(rate(sentiment_low_confidence_predictions_total[1h]))
+                / clamp_min(sum(rate(sentiment_predictions_total[1h])), 1e-9)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.15] }

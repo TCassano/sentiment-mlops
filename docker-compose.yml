@@ -1,0 +1,57 @@
+# Local monitoring stack:  docker compose up -d --build
+#   API        http://localhost:8000/docs
+#   Prometheus http://localhost:9090   (Alerts tab -> rules in monitoring/prometheus/alerts.yml)
+#   Grafana    http://localhost:3000   (admin / admin, dashboard "Sentiment API")
+services:
+  api:
+    build: .
+    image: sentiment-api:local
+    ports:
+      - "8000:8000"
+    environment:
+      LOW_CONFIDENCE_THRESHOLD: "0.5"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Replays sample social posts against the API so the dashboard has data.
+  loadgen:
+    image: python:3.11-slim
+    command: ["python", "/scripts/load_generator.py", "--url", "http://api:8000", "--rps", "2"]
+    volumes:
+      - ./scripts:/scripts:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
