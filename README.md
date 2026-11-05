@@ -87,6 +87,46 @@ scattare per il rumore e abbastanza bassa da accorgersi di testi fuori dominio. 
 Per vedere reagire i pannelli di drift, mandare testi fuori dominio dopo 200 richieste:
 `python scripts/load_generator.py --drift-after 200`.
 
+## Pipeline di valutazione e retraining (Airflow)
+
+Il DAG [`sentiment_monitoring_retraining`](airflow/dags/sentiment_retraining_dag.py) gira ogni settimana:
+
+```
+collect_data → validate_data → evaluate_current_model → check_drift → decide
+    decide ──(retrain)──→ retrain_model → evaluate_and_promote ──┐
+    decide ──(ok)───────→ skip_retraining ───────────────────────┴─→ publish_report
+```
+
+| Passo | Cosa fa |
+|---|---|
+| `collect_data` | raccoglie un lotto di post etichettati (simulato con `tweet_eval` train) |
+| `validate_data` | controlli di qualità: righe minime, colonne, testi vuoti, etichette ammesse; se fallisce, il run si ferma |
+| `evaluate_current_model` | macro-F1 del modello in produzione sul lotto |
+| `check_drift` | PSI della lunghezza e delle etichette, marcatori social, calo di confidenza rispetto al riferimento |
+| `decide` | retraining se macro-F1 < 0.65, se cala di oltre 0.05 rispetto al riferimento, o se c'è drift |
+| `retrain_model` | fine-tuning di un'epoca sul lotto nuovo → modello candidato |
+| `evaluate_and_promote` | il candidato va in produzione solo se batte il modello attuale di almeno 0.01 di macro-F1 su un *golden set* fisso |
+| `publish_report` | report JSON del run, qualunque ramo sia stato eseguito |
+
+Tutta la logica sta in [`sentiment_service.pipeline`](src/sentiment_service/pipeline/) ed è testata senza Airflow
+(`tests/test_steps.py`, con un modello finto). Il file del DAG si limita a collegare i passi; i task si passano
+solo valori piccoli (percorsi dei file e dizionari di metriche) tramite XCom, mai i dati.
+
+Riferimento misurato sul modello attuale (`tweet_eval` validation, 1000 esempi stratificati): macro-F1 **0.753**,
+predizioni con confidenza < 0.5 **4.0%**.
+
+```bash
+python scripts/evaluate.py --sample 2000        # valutazione singola, report in reports/eval.json
+
+# Airflow (Linux/WSL, Airflow 2.10)
+pip install "apache-airflow==2.10.4" --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.10.4/constraints-3.11.txt
+pip install -r requirements-torch-cpu.txt -r requirements-dev.txt && pip install .
+export AIRFLOW__CORE__DAGS_FOLDER=$PWD/airflow/dags
+airflow standalone
+```
+
+Nel CI il job `dag-check` installa Airflow e verifica che il DAG si carichi senza errori e abbia la struttura attesa.
+
 ## CI/CD (GitHub Actions)
 
 Il workflow [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) gira a ogni push e pull request.
@@ -96,6 +136,7 @@ Il workflow [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) gira a 
 | `lint` | CI | `ruff check` e `ruff format --check` |
 | `test` | CI | test veloci con modello finto e copertura |
 | `test-model` | CI | test comportamentali sul modello reale (pesi in cache) |
+| `dag-check` | CI | installa Airflow e verifica che il DAG si carichi con la struttura attesa |
 | `docker` | build + CD | build dell'immagine, smoke test del container; su `main` e sui tag `v*` pubblica su GHCR |
 | `deploy-hf-space` | CD (opzionale) | carica il servizio su uno Space Docker di HuggingFace |
 

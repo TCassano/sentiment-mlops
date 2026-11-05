@@ -73,6 +73,24 @@ jobs:
       - name: Behavioural tests on the real model
         run: pytest -m model
 
+  dag-check:
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_VERSION: "2.10.4"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Airflow (official constraints)
+        run: |
+          pip install "apache-airflow==${AIRFLOW_VERSION}" pytest \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+          airflow db migrate
+      - name: DAG integrity test
+        run: pytest tests/test_dag.py --noconftest -p no:cacheprovider
+
   # ---------------------------------------------------------------- Build + CD
   docker:
     needs: [lint, test, test-model]
