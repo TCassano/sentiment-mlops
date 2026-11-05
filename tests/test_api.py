@@ -47,6 +47,17 @@ def test_batch_rejects_invalid_input(client, payload):
     assert client.post("/predict/batch", json=payload).status_code == 422
 
 
+def test_metrics_exposed_and_updated(client):
+    client.post("/predict", json={"text": "great stuff @acme #launch"})
+    text = client.get("/metrics/").text
+    assert 'sentiment_predictions_total{label="positive"}' in text
+    assert 'sentiment_http_requests_total{endpoint="/predict",method="POST",status="200"}' in text
+    assert "sentiment_prediction_confidence_bucket" in text
+    assert "sentiment_model_loaded 1.0" in text
+    assert 'sentiment_input_markers_total{marker="mention"}' in text
+    assert 'sentiment_input_markers_total{marker="hashtag"}' in text
+
+
 def test_degraded_when_model_fails_to_load(broken_client):
     health = broken_client.get("/health").json()
     assert health["status"] == "degraded"

@@ -1,4 +1,4 @@
-"""FastAPI application: /health, /predict, /predict/batch."""
+"""FastAPI application: /health, /predict, /predict/batch, /metrics."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from prometheus_client import make_asgi_app
 
-from sentiment_service import __version__
+from sentiment_service import __version__, metrics
 from sentiment_service.config import Settings, get_settings
 from sentiment_service.model import HFSentimentModel, SentimentPredictor
 from sentiment_service.schemas import (
@@ -46,10 +47,14 @@ def create_app(
             logger.info(
                 "Model %s loaded in %.1fs", settings.model_name, time.perf_counter() - started
             )
+            metrics.MODEL_LOADED.set(1)
+            metrics.MODEL_INFO.labels(model_name=settings.model_name).set(1)
         except Exception:
             # Keep the process up so /health can report the failure instead of crash-looping.
             logger.exception("Model loading failed")
+            metrics.MODEL_LOADED.set(0)
         yield
+        metrics.MODEL_LOADED.set(0)
 
     app = FastAPI(
         title="Sentiment Monitoring API",
@@ -57,6 +62,23 @@ def create_app(
         version=__version__,
         lifespan=lifespan,
     )
+    app.mount("/metrics", make_asgi_app())
+
+    @app.middleware("http")
+    async def track_requests(request: Request, call_next):
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            route = request.scope.get("route")
+            # Use the route template (not the raw URL) to keep label cardinality bounded.
+            endpoint = getattr(route, "path", "unmatched")
+            if endpoint != "/metrics":
+                metrics.REQUESTS.labels(endpoint, request.method, str(status)).inc()
+                metrics.LATENCY.labels(endpoint).observe(time.perf_counter() - started)
 
     def _predictor(request: Request) -> SentimentPredictor:
         predictor = request.app.state.predictor
@@ -72,6 +94,7 @@ def create_app(
                 detail=f"texts at positions {too_long} exceed {settings.max_text_chars} chars",
             )
         predictions = _predictor(request).predict(texts)
+        metrics.record_predictions(texts, predictions, settings.low_confidence_threshold)
         return [
             PredictionOut(text=t, label=p.label, score=p.score, scores=p.scores)
             for t, p in zip(texts, predictions, strict=True)

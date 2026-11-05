@@ -111,6 +111,7 @@ jobs:
           curl -sf -X POST http://localhost:8000/predict \
             -H 'Content-Type: application/json' \
             -d '{"text": "I love this!"}' | grep '"label":"positive"'
+          curl -sf http://localhost:8000/metrics/ | grep sentiment_predictions_total
       - name: Container logs
         if: failure()
         run: docker logs api
