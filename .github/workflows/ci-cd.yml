@@ -1,0 +1,165 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  MODEL_NAME: cardiffnlp/twitter-roberta-base-sentiment-latest
+
+jobs:
+  # ---------------------------------------------------------------- CI
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff==0.8.4
+      - name: Lint
+        run: ruff check --output-format=github .
+      - name: Format check
+        run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install
+        run: |
+          pip install -r requirements-torch-cpu.txt
+          pip install -r requirements-dev.txt
+          pip install -e . --no-deps
+      - name: Unit + API tests (fake model)
+        run: pytest -m "not model" --cov=sentiment_service --cov-report=term-missing --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  test-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Cache HuggingFace weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ env.MODEL_NAME }}-v1
+      - name: Install
+        run: |
+          pip install -r requirements-torch-cpu.txt
+          pip install -r requirements-dev.txt
+          pip install -e . --no-deps
+      - name: Behavioural tests on the real model
+        run: pytest -m model
+
+  # ---------------------------------------------------------------- Build + CD
+  docker:
+    needs: [lint, test, test-model]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: sentiment-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the container
+        run: |
+          docker run -d --name api -p 8000:8000 sentiment-api:ci
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health | grep '"model_loaded":true'
+          curl -sf -X POST http://localhost:8000/predict \
+            -H 'Content-Type: application/json' \
+            -d '{"text": "I love this!"}' | grep '"label":"positive"'
+      - name: Container logs
+        if: failure()
+        run: docker logs api
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+  deploy-hf-space:
+    # Optional: runs only on main and only if the HF_TOKEN secret is configured.
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if HuggingFace is not configured
+        id: check
+        run: |
+          if [ -z "$HF_TOKEN" ] || [ -z "$HF_SPACE_ID" ]; then
+            echo "HF_TOKEN / HF_SPACE_ID not set: skipping deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Assemble Space content
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          mkdir space
+          cp -r Dockerfile pyproject.toml requirements.txt requirements-torch-cpu.txt src space/
+          cp deploy/hf_space/README.md space/README.md
+      - name: Upload to the Docker Space
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          pip install huggingface-hub==0.27.0
+          huggingface-cli upload "$HF_SPACE_ID" space . --repo-type space \
+            --token "$HF_TOKEN" --commit-message "Deploy ${GITHUB_SHA::7}"

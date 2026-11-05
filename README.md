@@ -54,6 +54,22 @@ docker run --rm -p 8000:8000 sentiment-api:local
 L'immagine usa `python:3.11-slim` con PyTorch CPU, include i pesi del modello (nessun download all'avvio), gira
 come utente non-root e ha un `HEALTHCHECK` su `/health`. Per un'immagine senza pesi: `--build-arg PRELOAD_MODEL=0`.
 
+## CI/CD (GitHub Actions)
+
+Il workflow [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) gira a ogni push e pull request.
+
+| Job | Fase | Cosa fa |
+|---|---|---|
+| `lint` | CI | `ruff check` e `ruff format --check` |
+| `test` | CI | test veloci con modello finto e copertura |
+| `test-model` | CI | test comportamentali sul modello reale (pesi in cache) |
+| `docker` | build + CD | build dell'immagine, smoke test del container; su `main` e sui tag `v*` pubblica su GHCR |
+| `deploy-hf-space` | CD (opzionale) | carica il servizio su uno Space Docker di HuggingFace |
+
+Il job `docker` parte solo se i tre job di CI passano (`needs`). Il deploy su HuggingFace è opzionale: si attiva
+creando il secret `HF_TOKEN` (token con permesso di scrittura) e la variabile `HF_SPACE_ID` (es. `utente/sentiment-api`)
+in *Settings → Secrets and variables → Actions*. Senza questi valori il job termina senza errori e salta il deploy.
+
 ## Test e qualità del codice
 
 ```bash
